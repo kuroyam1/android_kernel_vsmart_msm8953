@@ -5,9 +5,6 @@ on:
   push:
     branches: [lineage-22.2]
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -17,16 +14,36 @@ jobs:
       - name: Init KernelSU submodule
         run: git submodule update --init --recursive
 
-      # KSU is already in-tree (CONFIG_KSU=y in casuarina_defconfig), so ksu stays off.
-      - uses: dabao1955/kernel_build_action@main
+      - name: Neutron clang 18
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev zip zstd
+          curl -L -o /tmp/neutron.tar.zst \
+            https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/09092023/neutron-clang-09092023.tar.zst
+          mkdir -p "$HOME/neutron"
+          tar --zstd -xf /tmp/neutron.tar.zst -C "$HOME/neutron"
+
+      - name: Build
+        run: |
+          export PATH="$HOME/neutron/bin:$PATH"
+          export LD_LIBRARY_PATH="$HOME/neutron/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          make -j$(nproc) ARCH=arm64 O=out casuarina_defconfig
+          make -j$(nproc) ARCH=arm64 O=out \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE="$HOME/neutron/bin/aarch64-linux-gnu-" \
+            CROSS_COMPILE_ARM32="$HOME/neutron/bin/arm-linux-gnueabi-" \
+            Image.gz-dtb
+
+      - name: Package AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 ak3
+          cp out/arch/arm64/boot/Image.gz-dtb ak3/
+          sed -i 's|^BLOCK=.*|BLOCK=auto;|; s|^do.devicecheck=.*|do.devicecheck=0|; s|^IS_SLOT_DEVICE=.*|IS_SLOT_DEVICE=auto;|' ak3/anykernel.sh
+          rm -rf ak3/.git ak3/README.md
+          (cd ak3 && zip -r ../AnyKernel3-flasher.zip .)
+
+      - uses: actions/upload-artifact@v4
         with:
-          kernel-url: .
-          config: casuarina_defconfig
-          arch: arm64
-          android-version: '11'
-          aosp-gcc: true
-          aosp-clang: true
-          aosp-clang-version: r416183b
-          anykernel3: true
-          release: true
-          access-token: ${{ secrets.GITHUB_TOKEN }}
+          name: AnyKernel3-flasher
+          path: AnyKernel3-flasher.zip
