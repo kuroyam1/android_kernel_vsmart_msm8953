@@ -1,0 +1,32 @@
+name: Build kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lineage-22.2]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Init KernelSU submodule
+        run: git submodule update --init --recursive
+
+      # KSU is already in-tree (CONFIG_KSU=y in casuarina_defconfig), so ksu stays off.
+      - uses: dabao1955/kernel_build_action@main
+        with:
+          kernel-url: .
+          config: casuarina_defconfig
+          arch: arm64
+          android-version: '11'
+          aosp-gcc: true
+          aosp-clang: true
+          aosp-clang-version: r416183b
+          anykernel3: true
+          release: true
+          access-token: ${{ secrets.GITHUB_TOKEN }}
